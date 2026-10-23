@@ -179,3 +179,18 @@ fn a_folder_that_itself_lives_under_appdata_is_still_indexed() {
     assert_eq!(names(&store, "name:report"), vec!["report.txt"]);   // found although the path has AppData and a dot folder above it
     assert!(names(&store, "name:junk").is_empty());                 // but a dot folder inside it is skipped
 }
+
+#[test]
+fn under_exclusion_works_with_windows_backslash_paths() {
+    use fsearch::store::FileRecord;
+    let store = Store::open_in_memory().unwrap();
+    let rec = |path: &str, name: &str| (FileRecord { path: path.into(), name: name.into(), ext: "pdf".into(), kind: "PDF Document".into(), size: 1, mtime: 1, ctime: 1 }, None);
+    store.upsert_batch(&[
+        rec(r"C:\Users\me\Private\secret plan.pdf", "secret plan.pdf"),
+        rec(r"C:\Users\me\Private\deep\more plan.pdf", "more plan.pdf"),
+        rec(r"C:\Users\me\PrivateStuff\plan notes.pdf", "plan notes.pdf"),
+    ]).unwrap();
+    let q = r#"plan -under:"C:\Users\me\Private""#;
+    assert_eq!(names(&store, q), vec!["plan notes.pdf"]);          // the folder and what is below it are hidden; a sibling sharing the prefix is not
+    assert_eq!(names(&store, r#"plan -under:"C:\Users\me\Private\""#), vec!["plan notes.pdf"]);   // trailing separator is fine too
+}

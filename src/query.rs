@@ -211,7 +211,7 @@ impl Query {
             let base = u.trim_end_matches(['\\', '/']);
             wh.push("(f.path <> ? AND f.path NOT LIKE ? ESCAPE '\\' AND f.path NOT LIKE ? ESCAPE '\\')".into());
             args.push(Value::Text(base.to_string()));
-            args.push(Value::Text(format!("{}\\%", Self::escape_like(base))));
+            args.push(Value::Text(format!("{}\\\\%", Self::escape_like(base))));   // an escaped backslash, then %
             args.push(Value::Text(format!("{}/%", Self::escape_like(base))));
         }
         if !self.not_exts.is_empty() {
