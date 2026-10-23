@@ -19,6 +19,9 @@ pub struct Options {
     pub nice: bool,
     /// Other registered folders inside the one being crawled: their files are theirs to maintain, never removed here.
     pub nested_roots: Vec<String>,
+    /// The folder being indexed. Exclusions look only at the part of a path below it, so a folder that itself lives
+    /// under e.g. `AppData` (or a temp folder) can still be indexed.
+    pub base: Option<std::path::PathBuf>,
 }
 
 impl Default for Options {
@@ -31,12 +34,14 @@ impl Default for Options {
                 .iter().map(|s| s.to_string()).collect(),
             nice: false,
             nested_roots: Vec::new(),
+            base: None,
         }
     }
 }
 
 impl Options {
     pub fn is_excluded(&self, path: &Path) -> bool {
+        let path = match &self.base { Some(b) => path.strip_prefix(b).unwrap_or(path), None => path };
         // The Start-menu folders live inside AppData and are what makes apps searchable.
         let start_menu = path.components().any(|c| c.as_os_str().eq_ignore_ascii_case("Start Menu"));
         path.components().any(|c| {
@@ -135,6 +140,8 @@ fn flush(store: &Store, pending: &mut Vec<Planned>, opts: &Options) -> Result<()
 }
 
 pub fn crawl(store: &Store, root: &Path, opts: &Options, mut progress: impl FnMut(&CrawlStats)) -> Result<CrawlStats> {
+    let scoped = Options { base: Some(root.to_path_buf()), ..opts.clone() };
+    let opts = &scoped;
     let mut stats = CrawlStats::default();
     let mut seen: HashSet<String> = HashSet::new();
     let mut pending: Vec<Planned> = Vec::with_capacity(CHUNK);

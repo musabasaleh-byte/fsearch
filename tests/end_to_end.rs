@@ -49,6 +49,7 @@ fn crawl_search_update_delete() {
 
     // content edits are re-indexed; deletions are removed
     fs::write(root.join("notes.md"), "completely different text about zebras").unwrap();
+    let opts = Options { base: Some(root.clone()), ..opts.clone() };
     assert!(index_file(&store, &root.join("notes.md"), &opts).unwrap());
     assert_eq!(names(&store, "zebras"), vec!["notes.md"]);
     assert!(names(&store, "content:inverted").is_empty());
@@ -163,4 +164,18 @@ fn nested_root_files_survive_the_parent_crawl_and_the_name_index_can_be_repaired
     let (added, _) = store.repair_name_index().unwrap();
     assert!(added >= 1);
     assert_eq!(names(&store, "name:excel"), vec!["Excel.lnk"]);
+}
+
+#[test]
+fn a_folder_that_itself_lives_under_appdata_is_still_indexed() {
+    // Exclusions apply below the indexed folder only. (CI runners keep their temp folder under AppData.)
+    let root = tempdir("appdata").join("AppData").join("Local").join(".hidden-parent").join("work");
+    fs::create_dir_all(root.join("sub")).unwrap();
+    fs::create_dir_all(root.join(".cache")).unwrap();
+    fs::write(root.join("sub/report.txt"), "x").unwrap();
+    fs::write(root.join(".cache/junk.txt"), "x").unwrap();
+    let store = Store::open_in_memory().unwrap();
+    crawl(&store, &root, &Options::default(), |_| {}).unwrap();
+    assert_eq!(names(&store, "name:report"), vec!["report.txt"]);   // found although the path has AppData and a dot folder above it
+    assert!(names(&store, "name:junk").is_empty());                 // but a dot folder inside it is skipped
 }

@@ -98,9 +98,9 @@ impl App {
                 let counter = tx.clone();
                 let counter_ctx = ctx.clone();
                 std::thread::spawn(move || {
-                    let opts = Options::default();
                     let mut n = 0usize;
                     for dir in dirs {
+                        let opts = Options { base: Some(dir.clone()), ..Options::default() };
                         let walker = walkdir::WalkDir::new(&dir).follow_links(false).into_iter().filter_entry(|e| !opts.is_excluded(e.path()) || e.path() == dir);
                         for e in walker.filter_map(|e| e.ok()) {
                             if e.file_type().is_file() { n += 1; }

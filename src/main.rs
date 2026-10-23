@@ -74,9 +74,15 @@ enum Cmd {
 }
 
 fn root_options(roots: &[(String, bool)], path: &Path) -> Options {
-    let content = roots.iter().filter(|(r, _)| path.starts_with(r)).max_by_key(|(r, _)| r.len()).map(|(_, c)| *c).unwrap_or(false);
-    let nested_roots = roots.iter().filter(|(r, _)| Path::new(r) != path && Path::new(r).starts_with(path)).map(|(r, _)| r.clone()).collect();
-    Options { content, nice: true, nested_roots, ..Options::default() }
+    // The registered folder this path belongs to (the deepest one).
+    let root = roots.iter().filter(|(r, _)| path.starts_with(r)).max_by_key(|(r, _)| r.len());
+    let content = root.map(|(_, c)| *c).unwrap_or(false);
+    let base = root.map(|(r, _)| PathBuf::from(r));
+    let nested_roots = match &base {
+        Some(b) => roots.iter().filter(|(r, _)| Path::new(r) != b.as_path() && Path::new(r).starts_with(b)).map(|(r, _)| r.clone()).collect(),
+        None => Vec::new(),
+    };
+    Options { content, nice: true, nested_roots, base, ..Options::default() }
 }
 
 fn daemon(store: &Store, db: &Path) -> Result<()> {
