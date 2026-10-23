@@ -176,9 +176,16 @@ impl Query {
         for t in &self.terms {
             let mut name_args = Vec::new();
             let name_sql = Self::name_condition(t, &mut name_args);
-            wh.push(format!("({name_sql} OR f.id IN (SELECT rowid FROM content_fts WHERE content_fts MATCH ?))"));
-            args.extend(name_args);
-            args.push(Value::Text(Self::fts_phrase(t)));
+            if t.chars().count() >= 4 {
+                wh.push(format!("({name_sql} OR f.id IN (SELECT rowid FROM content_fts WHERE content_fts MATCH ?))"));
+                args.extend(name_args);
+                args.push(Value::Text(Self::fts_phrase(t)));
+            } else {
+                // Fragments of 1-3 letters (typing in progress) match names only: as word prefixes inside documents they
+                // would match thousands of unrelated files ("exc" -> except, exceed, exclude ...).
+                wh.push(name_sql);
+                args.extend(name_args);
+            }
         }
         for n in &self.names {
             let sql = Self::name_condition(n, &mut args);

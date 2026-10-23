@@ -63,6 +63,8 @@ enum Cmd {
     },
     /// Refresh the list of Microsoft Store apps (Calculator, Settings, ...) in the index
     Apps,
+    /// Rebuild the file-name search index if it has fallen out of step with the file list
+    Repair,
     /// Show or change the launcher hotkey, e.g. `fsearch hotkey ctrl+alt+f` (default ctrl+shift+space)
     Hotkey { combo: Option<String> },
     /// Index statistics (like mdutil -s)
@@ -73,7 +75,8 @@ enum Cmd {
 
 fn root_options(roots: &[(String, bool)], path: &Path) -> Options {
     let content = roots.iter().filter(|(r, _)| path.starts_with(r)).max_by_key(|(r, _)| r.len()).map(|(_, c)| *c).unwrap_or(false);
-    Options { content, nice: true, ..Options::default() }
+    let nested_roots = roots.iter().filter(|(r, _)| Path::new(r) != path && Path::new(r).starts_with(path)).map(|(r, _)| r.clone()).collect();
+    Options { content, nice: true, nested_roots, ..Options::default() }
 }
 
 fn daemon(store: &Store, db: &Path) -> Result<()> {
@@ -108,6 +111,7 @@ fn daemon(store: &Store, db: &Path) -> Result<()> {
     // Let the sign-in settle first: the hotkey and tray are already up, the heavy work waits.
     // At sign-in the heavy work waits a minute; right after a rebuild (empty index) it starts at once.
     if store.stats().map(|st| st.files > 0).unwrap_or(false) { std::thread::sleep(std::time::Duration::from_secs(60)); }
+    match store.repair_name_index() { Ok((a, r)) if a + r > 0 => say(&format!("name index repaired: {a} added, {r} stale removed")), Ok(_) => {}, Err(e) => say(&format!("name index check failed: {e}")) }
     if let Some(n) = service::sync_store_apps_if_stale(store) { say(&format!("store apps indexed: {n}")); }
     loop {
         let roots = store.roots()?;
@@ -118,12 +122,20 @@ fn daemon(store: &Store, db: &Path) -> Result<()> {
             std::thread::sleep(std::time::Duration::from_secs(15));
             continue;
         }
+        let flag = service::crawling_flag_path(db);
+        let _ = std::fs::remove_file(&flag);
         for root in &live {
-            match indexer::crawl(store, root, &root_options(&roots, root), |_| {}) {
+            let raised = std::cell::Cell::new(false);
+            let result = indexer::crawl(store, root, &root_options(&roots, root), |s| {
+                // Only a pass that really adds many files counts as "indexing" for the search window.
+                if s.indexed >= 300 && !raised.get() { raised.set(true); let _ = std::fs::write(&flag, b"1"); }
+            });
+            match result {
                 Ok(s) => say(&format!("crawled {}: scanned {}, indexed {}, removed {}", root.display(), s.scanned, s.indexed, s.removed)),
                 Err(e) => say(&format!("crawl {} failed: {e}", root.display())),
             }
         }
+        let _ = std::fs::remove_file(&flag);
         let mut last_check = std::time::Instant::now();
         let mut last_apps = std::time::Instant::now();
         let mut stop = || {
@@ -210,6 +222,7 @@ fn main() -> Result<()> {
             for (path, content) in store.roots()? { println!("{}{}", path, if content { "  (with content)" } else { "" }); }
         }
         Cmd::Daemon => daemon(&store, &db)?,
+        Cmd::Repair => { let (added, removed) = store.repair_name_index()?; println!("name index repaired: {added} entries added, {removed} stale entries removed"); }
         Cmd::Apps => println!("{} Microsoft Store apps indexed", sync_store_apps(&store)),
         Cmd::Install => for line in service::install(&db, &store)? { println!("{line}"); },
         Cmd::Hotkey { combo: None } => println!("launcher hotkey: {}", hotkey_label(&store)),

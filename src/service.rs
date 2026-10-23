@@ -10,6 +10,8 @@ pub fn data_dir(db: &Path) -> PathBuf {
 }
 pub fn pid_file(db: &Path) -> PathBuf { data_dir(db).join("daemon.pid") }
 pub fn log_path(db: &Path) -> PathBuf { data_dir(db).join("daemon.log") }
+/// Exists while the service is really indexing (many new files), not for the quiet re-check at every sign-in.
+pub fn crawling_flag_path(db: &Path) -> PathBuf { data_dir(db).join("indexing.flag") }
 pub fn hotkey_status_path(db: &Path) -> PathBuf { data_dir(db).join("hotkey.status") }
 pub fn daemon_exe(db: &Path) -> PathBuf { data_dir(db).join("fsearch.exe") }
 pub fn gui_exe(db: &Path) -> PathBuf { data_dir(db).join("fsearch-gui.exe") }

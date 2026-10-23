@@ -142,3 +142,25 @@ fn hidden_categories_and_private_folders_are_excluded() {
     assert_eq!(names(&store, "plan -ext:png,txt"), vec!["plan notes.pdf", "secret plan.pdf"]);
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn nested_root_files_survive_the_parent_crawl_and_the_name_index_can_be_repaired() {
+    let home = tempdir("nested");
+    fs::create_dir_all(home.join("AppData/Roaming/Start Menu/Programs")).unwrap();
+    fs::write(home.join("AppData/Roaming/Start Menu/Programs/Excel.lnk"), "x").unwrap();
+    fs::write(home.join("notes.txt"), "hello").unwrap();
+    let store = Store::open_in_memory().unwrap();
+    let programs = home.join("AppData/Roaming/Start Menu/Programs");
+    crawl(&store, &programs, &Options::default(), |_| {}).unwrap();
+    // The parent crawl does not descend into AppData; without the nested-root rule it would delete Excel.lnk.
+    let parent = Options { nested_roots: vec![programs.to_string_lossy().into_owned()], ..Options::default() };
+    crawl(&store, &home, &parent, |_| {}).unwrap();
+    assert_eq!(names(&store, "name:excel"), vec!["Excel.lnk"]);
+
+    // Simulate a name index that lost an entry.
+    store.conn_for_tests().execute("DELETE FROM name_tri", []).unwrap();
+    assert!(names(&store, "name:excel").is_empty());
+    let (added, _) = store.repair_name_index().unwrap();
+    assert!(added >= 1);
+    assert_eq!(names(&store, "name:excel"), vec!["Excel.lnk"]);
+}

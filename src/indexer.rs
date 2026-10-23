@@ -17,6 +17,8 @@ pub struct Options {
     pub excludes: Vec<String>,
     /// Background service: pause briefly while crawling so the disk and antivirus are not hammered.
     pub nice: bool,
+    /// Other registered folders inside the one being crawled: their files are theirs to maintain, never removed here.
+    pub nested_roots: Vec<String>,
 }
 
 impl Default for Options {
@@ -28,6 +30,7 @@ impl Default for Options {
                 "AppData", "Windows.old", "WinSxS", ".cache", ".gradle", ".npm", ".cargo", ".rustup", "site-packages"]
                 .iter().map(|s| s.to_string()).collect(),
             nice: false,
+            nested_roots: Vec::new(),
         }
     }
 }
@@ -38,6 +41,8 @@ impl Options {
         let start_menu = path.components().any(|c| c.as_os_str().eq_ignore_ascii_case("Start Menu"));
         path.components().any(|c| {
             let c = c.as_os_str().to_string_lossy();
+            // Hidden tool folders (.codex, .claude, .vscode ...) change all the time and are not your files.
+            if c.len() > 1 && c.starts_with('.') && c != ".." { return true; }
             self.excludes.iter().any(|e| e.eq_ignore_ascii_case(&c) && !(start_menu && e == "AppData"))
         })
     }
@@ -152,7 +157,7 @@ pub fn crawl(store: &Store, root: &Path, opts: &Options, mut progress: impl FnMu
     flush(store, &mut pending, opts)?;
 
     let stale: Vec<i64> = store.paths_under(&root.to_string_lossy())?.into_iter()
-        .filter(|(_, p)| !seen.contains(p)).map(|(id, _)| id).collect();
+        .filter(|(_, p)| !seen.contains(p) && !opts.nested_roots.iter().any(|n| Path::new(p).starts_with(n))).map(|(id, _)| id).collect();
     stats.removed = store.delete_ids(&stale)?;
     progress(&stats);
     Ok(stats)

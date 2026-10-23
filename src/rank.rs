@@ -52,6 +52,11 @@ fn type_score(name: &str) -> f64 {
     }
 }
 
+/// True when the file matched only through its text, not through its name.
+pub fn content_only(hit: &Hit, needles: &[String]) -> bool {
+    !needles.is_empty() && needles.iter().all(|n| name_score(&hit.name, n) == 0.0)
+}
+
 /// `launch` is (times opened from the launcher, last opened at, in ms).
 pub fn score(hit: &Hit, needles: &[String], home: &str, launch: Option<(i64, i64)>, now_ms: i64) -> f64 {
     let mut total = 0.0;
@@ -59,6 +64,7 @@ pub fn score(hit: &Hit, needles: &[String], home: &str, launch: Option<(i64, i64
         let parts: Vec<f64> = needles.iter().map(|n| name_score(&hit.name, n)).collect();
         total += parts.iter().sum::<f64>() / parts.len() as f64;
         if parts.iter().all(|s| *s >= 45.0) { total += 10.0; }
+        if parts.iter().all(|s| *s == 0.0) { total -= 30.0; }     // found only inside the text: below name matches
     }
     let age_days = ((now_ms - hit.mtime) as f64 / DAY_MS).max(0.0);
     total += 20.0 * 0.5f64.powf(age_days / 30.0);
@@ -82,9 +88,10 @@ pub fn group_rank(kind: &str) -> u8 {
     }
 }
 
-/// Keeps the best match first, then lists the rest grouped by kind (each group still best-first).
-pub fn group_hits(hits: &mut [Hit]) {
-    if hits.len() > 2 { hits[1..].sort_by_key(|h| group_rank(&h.kind)); }
+/// Keeps the best match first, then lists the rest grouped by kind (each group still best-first); files that matched
+/// only through their text come after all the files whose names match.
+pub fn group_hits(hits: &mut [Hit], needles: &[String]) {
+    if hits.len() > 2 { hits[1..].sort_by_key(|h| (content_only(h, needles), group_rank(&h.kind))); }
 }
 
 /// Sorts best-first. `needles` are the typed name fragments (lower-case), `launches` maps path -> (count, last).
@@ -174,8 +181,19 @@ mod tests {
     fn groups_keep_the_top_hit_then_order_by_kind() {
         let mk = |name: &str, kind: &str| Hit { path: format!(r"C:\x\{name}"), name: name.into(), kind: kind.into(), size: 1, mtime: 0 };
         let mut hits = vec![mk("a.png", "Image"), mk("b.py", "Source Code"), mk("c.pdf", "PDF Document"), mk("D.lnk", "Application")];
-        group_hits(&mut hits);
+        group_hits(&mut hits, &[]);
         let names: Vec<&str> = hits.iter().map(|h| h.name.as_str()).collect();
         assert_eq!(names, ["a.png", "D.lnk", "c.pdf", "b.py"]);
+    }
+
+    #[test]
+    fn files_matching_only_through_their_text_come_after_name_matches() {
+        let mk = |name: &str, kind: &str| Hit { path: format!(r"C:\Users\me\Documents\{name}"), name: name.into(), kind: kind.into(), size: 1, mtime: NOW - DAY_MS as i64 };
+        let needles = vec!["excel".to_string()];
+        let mut hits = vec![mk("Quarterly plan.docx", "Word Document"), mk("Notes.txt", "Text"), mk("excel_import.csv", "Spreadsheet"), mk("budget excel.png", "Image")];
+        rank_hits(&mut hits, &needles, HOME, &HashMap::new(), NOW);
+        group_hits(&mut hits, &needles);
+        let names: Vec<&str> = hits.iter().map(|h| h.name.as_str()).collect();
+        assert!(names[..2].contains(&"excel_import.csv") && names[..2].contains(&"budget excel.png"), "{names:?}");
     }
 }

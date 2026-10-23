@@ -145,8 +145,8 @@ struct App {
     icons: HashMap<String, Option<egui::TextureHandle>>,
     from_worker: Receiver<Results>,
     index_files: i64,
-    index_changed_at: Option<Instant>,
-    stats: Receiver<i64>,
+    crawling: bool,
+    stats: Receiver<(i64, bool)>,
     placer: Placer,
     close_at: Option<Instant>,
     look: Look,
@@ -200,7 +200,7 @@ impl App {
                 let paths: Vec<String> = hits.iter().map(|h| h.path.clone()).collect();
                 let launches = store.launches(&paths).unwrap_or_default();
                 rank_hits(&mut hits, &needles, &home, &launches, now_ms());
-                if q.kinds.is_empty() { group_hits(&mut hits); }
+                if q.kinds.is_empty() { group_hits(&mut hits, &needles); }
                 hits.truncate(60);
                 let _ = results_tx.send(Results { generation, hits, total, capped, millis: started.elapsed().as_millis() });
                 ctx.request_repaint();
@@ -225,20 +225,25 @@ impl App {
             });
         }
 
-        let (stats_tx, stats) = channel::<i64>();
+        let (stats_tx, stats) = channel::<(i64, bool)>();
         let ctx = cc.egui_ctx.clone();
         std::thread::spawn(move || {
             let Ok(store) = Store::open(&default_db_path()) else { return };
-            let mut last = -1;
+            let flag = fsearch::service::crawling_flag_path(&default_db_path());
+            let mut last = (-1, false);
             loop {
-                if let Ok(s) = store.stats() {
-                    if s.files != last {
-                        last = s.files;
-                        if stats_tx.send(s.files).is_err() { return; }
-                        ctx.request_repaint();      // only when it changed: a hidden window must not wake up every second
+                // Counting a big index is not free: only do it while the window is open (and once at the start).
+                let visible = VISIBLE.load(std::sync::atomic::Ordering::SeqCst);
+                let files = if visible || last.0 < 0 { store.stats().ok().map(|st| st.files) } else { Some(last.0) };
+                if let Some(files) = files {
+                    let now = (files, flag.exists());
+                    if now != last {
+                        last = now;
+                        if stats_tx.send(now).is_err() { return; }
+                        ctx.request_repaint();      // only when something changed: a hidden window must not wake up every second
                     }
                 }
-                std::thread::sleep(Duration::from_millis(700));
+                std::thread::sleep(Duration::from_millis(if visible { 700 } else { 3000 }));
             }
         });
 
@@ -251,7 +256,7 @@ impl App {
         }).unwrap_or((8, true, String::new()));
         let demo = std::env::var("FSEARCH_GUI_DEMO_QUERY").unwrap_or_default();   // for screenshots/tests
         let mut app = Self { text: demo, chip: Chip::All, selected: 0, hits: vec![], total: 0, capped: false, millis: 0, asked: 0, answered: 0,
-               to_worker, icons: HashMap::new(), from_worker, index_files: -1, index_changed_at: None, stats, placer: Placer::new(), close_at: None, look: Look::load_default(), frost: None, frost_tried: false, glass: HashMap::new(), shown_at: None, exclusions, max_rows, close_on_blur, was_focused: false, hidden: std::env::args().any(|a| a == "--background") };
+               to_worker, icons: HashMap::new(), from_worker, index_files: -1, crawling: false, stats, placer: Placer::new(), close_at: None, look: Look::load_default(), frost: None, frost_tried: false, glass: HashMap::new(), shown_at: None, exclusions, max_rows, close_on_blur, was_focused: false, hidden: std::env::args().any(|a| a == "--background") };
         if !app.text.is_empty() { app.search(); }
         app
     }
@@ -266,7 +271,7 @@ impl App {
     }
 
     fn indexing(&self) -> bool {
-        self.index_changed_at.map(|t| t.elapsed() < Duration::from_secs(3)).unwrap_or(false)
+        self.crawling
     }
 }
 
@@ -704,8 +709,8 @@ impl eframe::App for App {
             request_close(ctx);
         }
 
-        while let Ok(files) = self.stats.try_recv() {
-            if self.index_files >= 0 && files != self.index_files { self.index_changed_at = Some(Instant::now()); }
+        while let Ok((files, crawling)) = self.stats.try_recv() {
+            self.crawling = crawling;
             self.index_files = files;
         }
         let mut refresh = false;

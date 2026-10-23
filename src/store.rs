@@ -101,6 +101,9 @@ impl Store {
         Self::init(conn)
     }
 
+    #[doc(hidden)]
+    pub fn conn_for_tests(&self) -> &Connection { &self.conn }
+
     pub fn open_in_memory() -> Result<Self> {
         Self::init(Connection::open_in_memory()?)
     }
@@ -256,6 +259,15 @@ impl Store {
             size: 0, mtime: now_ms, ctime: now_ms }, None)).collect();
         self.upsert_batch(&items)?;
         Ok(items.len())
+    }
+
+    /// The name index (trigram) must have exactly one entry per file. If a file is missing from it, searching by name
+    /// cannot find it. Adds the missing entries and removes leftovers; returns (added, removed).
+    pub fn repair_name_index(&self) -> Result<(usize, usize)> {
+        let added = self.conn.execute(
+            "INSERT INTO name_tri(rowid, name) SELECT id, name FROM files WHERE id NOT IN (SELECT rowid FROM name_tri)", [])?;
+        let removed = self.conn.execute("DELETE FROM name_tri WHERE rowid NOT IN (SELECT id FROM files)", [])?;
+        Ok((added, removed))
     }
 
     /// Forget every indexed file (folders, settings and launch history stay). Used by "Rebuild index".
