@@ -1,0 +1,25 @@
+1 ICON "fsearch.ico"
+
+1 VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEOS 0x4
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "Musab Saleh"
+      VALUE "FileDescription", "fsearch - fast file search"
+      VALUE "ProductName", "fsearch"
+      VALUE "FileVersion", "0.1.0"
+      VALUE "ProductVersion", "0.1.0"
+      VALUE "LegalCopyright", "Copyright (c) 2026 Musab Saleh. MIT License."
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

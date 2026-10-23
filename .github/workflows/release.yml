@@ -1,0 +1,47 @@
+name: Release
+# Push a tag such as v0.1.0 to build fsearch-setup.exe and attach it to a GitHub Release.
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the service and launcher
+        shell: pwsh
+        run: |
+          $env:FSEARCH_BUILD = (Get-Date -Format "ddHHmm")
+          cargo build --release --features gui --bin fsearch --bin fsearch-gui
+          New-Item -ItemType Directory -Force payload | Out-Null
+          Copy-Item target\release\fsearch.exe, target\release\fsearch-gui.exe payload\
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          cargo build --release --features bundle --bin fsearch-setup
+          Copy-Item target\release\fsearch-setup.exe .
+          (Get-FileHash fsearch-setup.exe -Algorithm SHA256).Hash.ToLower() + "  fsearch-setup.exe" | Set-Content fsearch-setup.exe.sha256
+      - name: Sign the installer (only when a code-signing certificate is configured)
+        if: env.SIGN_PFX_BASE64 != ''
+        shell: pwsh
+        env:
+          SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
+          SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
+        run: |
+          [IO.File]::WriteAllBytes("sign.pfx", [Convert]::FromBase64String($env:SIGN_PFX_BASE64))
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
+          & $signtool sign /f sign.pfx /p $env:SIGN_PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 fsearch-setup.exe
+          Remove-Item sign.pfx
+          (Get-FileHash fsearch-setup.exe -Algorithm SHA256).Hash.ToLower() + "  fsearch-setup.exe" | Set-Content fsearch-setup.exe.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            fsearch-setup.exe
+            fsearch-setup.exe.sha256
+          generate_release_notes: true

@@ -1,0 +1,7 @@
+/target
+/payload/*.exe
+/fsearch-setup.exe
+*.db
+*.db-wal
+*.db-shm
+*.log
