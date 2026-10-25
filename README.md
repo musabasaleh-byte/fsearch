@@ -3,10 +3,10 @@
 Fast, Spotlight-style file search for Windows: press a shortcut, type, open. fsearch keeps a local index of your files
 (names and, optionally, the text inside documents), updates it live in the background, and shows results as you type.
 
-<p align="center"><img src="docs/images/launcher.png" alt="The fsearch search window" width="560"></p>
+<p align="center"><img src="docs/images/launcher-real.png" alt="The fsearch search window on Windows 11" width="640"></p>
 
-> The screenshots in this README are taken from the program itself with sample files. Fonts and the frosted-glass
-> blur look a little different on a real Windows PC.
+> The search window and setup screenshots are from a real Windows 11 PC (the surroundings are blurred for privacy).
+> The settings pages are rendered from the program with sample data, so fonts differ slightly from Windows.
 
 ## Contents
 [Install](#install) · [First run](#first-run) · [Using it](#using-it) · [Settings](#settings) · [How it works](#how-it-works) ·
@@ -24,7 +24,7 @@ To remove it: **Settings → Apps → fsearch → Uninstall** (this deletes the 
 
 ## First run
 
-<p align="center"><img src="docs/images/setup.png" alt="First-run setup window" width="420"></p>
+<p align="center"><img src="docs/images/setup-real.png" alt="First-run setup while indexing" width="520"></p>
 
 The first time, a short setup asks what to search and then does a **full scan** (like Spotlight's first indexing):
 
@@ -38,10 +38,12 @@ search works as soon as the scan is done, and apps are indexed first so they are
 
 ## Using it
 
-<p align="center"><img src="docs/images/idle.png" alt="The idle search bar" width="460"></p>
+<p align="center"><img src="docs/images/idle-real.png" alt="The search bar before you type" width="600"></p>
 
 Press **Ctrl + Shift + Space** anywhere (changeable in Settings). The bar opens in the middle of the screen you are on.
 Type to search; the window expands to show results, best match first, then grouped by kind (apps, documents, images, media, other, code).
+
+<p align="center"><img src="docs/images/results-word-real.png" alt="Results for the word 'word': the app first, then documents, text and images" width="520"></p>
 
 | | |
 |---|---|

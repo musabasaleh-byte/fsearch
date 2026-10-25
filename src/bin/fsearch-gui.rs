@@ -387,6 +387,23 @@ fn rule(ui: &mut egui::Ui) {
 /// (diameters and chords across the round buttons). A single textured rectangle has none.
 struct GlassTex { tex: egui::TextureHandle, pad: f32 }
 
+/// Apple-style "continuous" corners: a superellipse (exponent 5) instead of a circular arc, so the curvature eases in
+/// along the edge instead of starting abruptly. The corner is drawn a little wider (x1.25) to keep the same look of size.
+/// Returns the signed distance (negative inside) in pixels, first-order accurate, which is all anti-aliasing needs.
+fn continuous_sdf(px: f32, py: f32, w: f32, h: f32, r: f32) -> f32 {
+    const N: f32 = 5.0;
+    let rr = (r * 1.25).min(w / 2.0).min(h / 2.0);
+    let qx = (px - w / 2.0).abs() - (w / 2.0 - rr);
+    let qy = (py - h / 2.0).abs() - (h / 2.0 - rr);
+    if qx > 0.0 && qy > 0.0 {
+        let g = (qx.powf(N) + qy.powf(N)).powf(1.0 / N);
+        let grad = (qx.powf(2.0 * N - 2.0) + qy.powf(2.0 * N - 2.0)).sqrt() / g.powf(N - 1.0);
+        (g - rr) / grad.max(1e-3)
+    } else {
+        qx.max(qy) - rr
+    }
+}
+
 fn rounded_sdf(px: f32, py: f32, w: f32, h: f32, r: f32) -> f32 {
     let qx = (px - w / 2.0).abs() - (w / 2.0 - r);
     let qy = (py - h / 2.0).abs() - (h / 2.0 - r);
@@ -410,7 +427,8 @@ fn sample_frost(frost: &Frost, x: f32, y: f32) -> [f32; 3] {
 }
 
 /// `rect` is in window points; `tint` is straight (unmultiplied) RGBA.
-fn make_glass(ctx: &egui::Context, name: &str, rect: Rect, radius_pts: f32, tint: [u8; 4], frost: Option<&Frost>, ppp: f32) -> GlassTex {
+fn make_glass(ctx: &egui::Context, name: &str, rect: Rect, radius_pts: f32, tint: [u8; 4], frost: Option<&Frost>, ppp: f32, smooth: bool) -> GlassTex {
+    let sdf = |x: f32, y: f32, w: f32, h: f32, r: f32| if smooth { continuous_sdf(x, y, w, h, r) } else { rounded_sdf(x, y, w, h, r) };
     let pad = (24.0 * ppp).round().max(1.0);
     let (w, h) = ((rect.width() * ppp).round(), (rect.height() * ppp).round());
     let r = (radius_pts * ppp).min(h / 2.0).min(w / 2.0);
@@ -421,13 +439,16 @@ fn make_glass(ctx: &egui::Context, name: &str, rect: Rect, radius_pts: f32, tint
     for iy in 0..ih {
         for ix in 0..iw {
             let (x, y) = (ix as f32 + 0.5 - pad, iy as f32 + 0.5 - pad);          // pixels relative to the shape's top-left
-            let d = rounded_sdf(x, y, w, h, r);
+            let d = sdf(x, y, w, h, r);
             let cover = (0.5 - d).clamp(0.0, 1.0);
-            let shadow = 0.10 * (-0.5 * (rounded_sdf(x, y - 3.0 * ppp, w, h, r).max(0.0) / sigma).powi(2)).exp();
+            let shadow = if d < -2.0 { 0.0 } else { 0.10 * (-0.5 * (sdf(x, y - 3.0 * ppp, w, h, r).max(0.0) / sigma).powi(2)).exp() };
             let mut rgb = [tint[0] as f32, tint[1] as f32, tint[2] as f32];
             let mut alpha = ta;
             if let Some(f) = frost {
-                let base = sample_frost(f, f.origin.x + rect.min.x * ppp + x, f.origin.y + rect.min.y * ppp + y);
+                let mut base = sample_frost(f, f.origin.x + rect.min.x * ppp + x, f.origin.y + rect.min.y * ppp + y);
+                // Apple's "material": the blurred picture is also more saturated (about 160 %) and a touch lighter
+                let lum = 0.299 * base[0] + 0.587 * base[1] + 0.114 * base[2];
+                for c in 0..3 { base[c] = (lum + (base[c] - lum) * 1.6 + 6.0).clamp(0.0, 255.0); }
                 for c in 0..3 { rgb[c] = base[c] * (1.0 - ta) + rgb[c] * ta; }
                 alpha = 1.0;                                                         // what is behind is already in the picture
             }
@@ -526,15 +547,9 @@ fn soft_shadow_with(painter: &egui::Painter, rect: Rect, radius: f32, allow_circ
     }
 }
 
-fn soft_shadow(painter: &egui::Painter, rect: Rect, radius: f32) { soft_shadow_with(painter, rect, radius, true); }
-
 fn fill_with(painter: &egui::Painter, rect: Rect, radius: f32, color: Color32, allow_circle: bool) {
     if allow_circle && is_circle(rect, radius) { painter.circle_filled(rect.center(), radius, color); }
     else { painter.rect_filled(rect, radius, color); }
-}
-
-fn paint_glass(painter: &egui::Painter, rect: Rect, radius: f32, tint: Color32, frost: Option<&Frost>) {
-    paint_glass_with(painter, rect, radius, tint, frost, true);
 }
 
 fn paint_glass_with(painter: &egui::Painter, rect: Rect, radius: f32, tint: Color32, frost: Option<&Frost>, allow_circle: bool) {
@@ -681,7 +696,7 @@ impl App {
     /// The window never changes size (resizing a transparent window shows a half-drawn frame), so it is
     /// as tall as the panel can ever get; the unused part is transparent.
     fn window_height(&self) -> f32 {
-        2.0 * PAD + 24.0 + HEAD + 16.0 + 44.0 + 42.0 + self.max_rows as f32 * ROW + 52.0
+        2.0 * PAD + 24.0 + HEAD + 16.0 + 44.0 + 42.0 + self.max_rows as f32 * ROW + 68.0
     }
 }
 
@@ -746,16 +761,28 @@ impl eframe::App for App {
         let height = if !expanded { HEAD + 2.0 * PAD + 12.0 } else {
             let mut h = 2.0 * PAD + 24.0 + HEAD + 16.0 + 44.0;       // margins, search row, rule, filter pills
             if self.indexing() { h += 42.0; }
-            h += if rows > 0 { rows as f32 * ROW + 52.0 } else { 70.0 };
+            h += if rows > 0 { rows as f32 * ROW + 68.0 } else { 70.0 };
             h
         };
 
         let alpha = self.look.alpha();
-        let panel_color = Color32::from_rgba_unmultiplied(244, 245, 249, alpha);
         let frost = self.frost.clone();
         let mut active = Rect::NOTHING;     // what is actually drawn; the rest of the window is transparent
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
             let area = ui.max_rect().shrink(PAD);
+            // Opening: a critically damped spring (response 0.34 s) brings the window from 96.5 % to 100 % about the search
+            // bar while it fades in over 0.1 s: the same easing family iOS uses for sheets and popovers.
+            let t = self.shown_at.map(|t| t.elapsed().as_secs_f32()).unwrap_or(1.0);
+            if t < 0.6 {
+                let w0 = std::f32::consts::TAU / 0.34;
+                let scale = 1.0 - 0.035 * (-w0 * t).exp() * (1.0 + w0 * t);
+                let pivot = Pos2::new(area.center().x, area.top() + HEAD / 2.0);
+                ctx.set_transform_layer(ui.layer_id(), egui::emath::TSTransform::new(pivot.to_vec2() * (1.0 - scale), scale));
+                ui.set_opacity((t / 0.10).clamp(0.0, 1.0));
+                ctx.request_repaint();
+            } else {
+                ctx.set_transform_layer(ui.layer_id(), egui::emath::TSTransform::IDENTITY);
+            }
             if !expanded {
                 // ---- idle: a floating pill and four round buttons, each with its own shadow
                 active = Rect::from_min_size(area.min, Vec2::new(area.width(), HEAD));
@@ -763,7 +790,7 @@ impl eframe::App for App {
                 let pill = Rect::from_min_size(area.min, Vec2::new(area.width() - bubbles_w, HEAD));
                 let ppp = ctx.pixels_per_point();
                 let glass = self.glass.entry("pill".to_string())
-                    .or_insert_with(|| make_glass(ctx, "pill", pill, HEAD / 2.0, [246, 247, 250, alpha], frost.as_ref(), ppp));
+                    .or_insert_with(|| make_glass(ctx, "pill", pill, HEAD / 2.0, [246, 247, 250, alpha], frost.as_ref(), ppp, false));
                 show_glass(ui.painter(), glass, pill);
                 if search_field(ui, ctx, &mut self.text, pill, self.was_focused) { refresh = true; }
                 if gear_button(ui, pill.right_center() - Vec2::new(26.0, 0.0), 14.0) { open_settings(); request_close(ctx); }
@@ -774,8 +801,10 @@ impl eframe::App for App {
                     let hovered = resp.hovered();
                     let key = format!("bubble{i}-{hovered}");
                     let tint = if hovered { [255, 255, 255, alpha.saturating_add(12)] } else { [246, 247, 250, alpha] };
-                    let glass = self.glass.entry(key.clone()).or_insert_with(|| make_glass(ctx, &key, r, HEAD / 2.0, tint, frost.as_ref(), ppp));
-                    show_glass(ui.painter(), glass, r);
+                    let glass = self.glass.entry(key.clone()).or_insert_with(|| make_glass(ctx, &key, r, HEAD / 2.0, tint, frost.as_ref(), ppp, false));
+                    // pressed: shrinks to 96 % at once, like an iOS button under the finger
+                    let shown = if resp.is_pointer_button_down_on() { Rect::from_center_size(r.center(), r.size() * 0.96) } else { r };
+                    show_glass(ui.painter(), glass, shown);
                     draw_chip_icon(ui.painter(), chip, center, Color32::from_gray(85));
                     if resp.on_hover_text(format!("{}  (Ctrl+{})", chip.label(), i + 2)).clicked() { self.chip = chip; refresh = true; }
                 }
@@ -783,9 +812,12 @@ impl eframe::App for App {
                 // ---- expanded: one rounded panel, search row on top, thin rules between sections
                 let panel = Rect::from_min_size(area.min, Vec2::new(area.width(), height - 2.0 * PAD));
                 active = panel;
-                soft_shadow(ui.painter(), panel, 28.0);
-                paint_glass(ui.painter(), panel, 28.0, panel_color, frost.as_ref());
-                ui.painter().rect_stroke(panel, 28.0, Stroke::new(1.0_f32, Color32::from_white_alpha(230)), egui::StrokeKind::Inside);
+                // One pre-rendered bitmap (smooth edge, shadow, rim, frost, tint) per panel size, like the idle bar:
+                // egui's own triangles leave stair-stepped edges on a transparent window.
+                let ppp = ctx.pixels_per_point();
+                let key = format!("panel-{}x{}-{}-{}", (panel.width() * ppp).round() as i32, (panel.height() * ppp).round() as i32, alpha, frost.is_some());
+                let glass = self.glass.entry(key.clone()).or_insert_with(|| make_glass(ctx, &key, panel, 28.0, [244, 245, 249, alpha], frost.as_ref(), ppp, true));
+                show_glass(ui.painter(), glass, panel);
                 let inner = panel.shrink2(Vec2::new(18.0, 12.0));
                 let head = Rect::from_min_size(inner.min, Vec2::new(inner.width(), HEAD));
                 if search_field(ui, ctx, &mut self.text, head, self.was_focused) { refresh = true; }
