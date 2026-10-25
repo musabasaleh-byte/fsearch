@@ -9,8 +9,19 @@ Fast, Spotlight-style file search for Windows: press a shortcut, type, open. fse
 > The settings pages are rendered from the program with sample data, so fonts differ slightly from Windows.
 
 ## Contents
-[Install](#install) · [First run](#first-run) · [Using it](#using-it) · [Settings](#settings) · [How it works](#how-it-works) ·
+[At a glance](#at-a-glance) · [Install](#install) · [First run](#first-run) · [Using it](#using-it) · [Settings](#settings) · [How it works](#how-it-works) ·
 [Command line](#command-line) · [Build from source](#build-from-source) · [Limits](#limits) · [License](#license)
+
+## At a glance
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/poster-everything.jpg" alt="Everything you need. One search away."></td>
+<td width="50%"><img src="docs/images/poster-layers.jpg" alt="Search, layer by layer: search box, filters, results"></td>
+</tr>
+</table>
+
+<sub>Concept illustrations of the interface (sample file names). Real screenshots from a Windows 11 PC are below.</sub>
 
 ## Install
 
